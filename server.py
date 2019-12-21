@@ -10,43 +10,38 @@ from starlette.routing import Route
 from starlette.responses import JSONResponse
 
 
-class RasaNLUSimpleServer:
-    def __init__(self):
-        self.componentBuilder = components.ComponentBuilder()
-        self.logger = logging.getLogger("RasaNLUSimpleServer")
+componentBuilder = components.ComponentBuilder()
+logger = logging.getLogger("RasaNLUSimpleServer")
 
-        self.preload_models()
+@functools.lru_cache(maxsize=128)
+def load_model(model_path):
+    tempdir = tempfile.mkdtemp()
+    unpacked_model = unpack_model(model_path, tempdir)
+    _, nlu_model = get_model_subdirectories(unpacked_model)
+    return Interpreter.load(nlu_model, componentBuilder)
 
-        self.routes = [Route("/parse", endpoint=self.parse, methods=["POST"])]
-        self.app = Starlette(debug=True, routes=self.routes)
+def preload_models():
+    model_dir = "models"
+    if os.path.exists(model_dir):
+        for (_, _, files) in os.walk(model_dir):
+            for file in files:
+                load_model(os.path.join("models", file))
 
-    @functools.lru_cache(maxsize=128)
-    def load_model(self, model_path):
-        tempdir = tempfile.mkdtemp()
-        unpacked_model = unpack_model(model_path, tempdir)
-        _, nlu_model = get_model_subdirectories(unpacked_model)
-        return Interpreter.load(nlu_model, self.componentBuilder)
+async def parse(request):
+    try:
+        body = await request.json()
+        model_name = body["model"]
+        text = body["text"]
+        model = load_model(os.path.join("models", model_name))
+        parsed_text = JSONResponse(model.parse(text))
+    except Exception as e:
+        logger.error(e)
+        parsed_text = JSONResponse(
+            {"Status": "500", "Message": "Something went wrong"}
+        )
+    return parsed_text
 
-    def preload_models(self):
-        model_dir = "models"
-        if os.path.exists(model_dir):
-            for (here, dirs, files) in os.walk(model_dir):
-                for file in files:
-                    self.load_model(os.path.join("models", file))
+preload_models()
 
-    async def parse(self, request):
-        try:
-            body = await request.json()
-            model_name = body["model"]
-            text = body["text"]
-            model = self.load_model(os.path.join("models", model_name))
-            parsed_text = JSONResponse(model.parse(text))
-        except Exception as e:
-            self.logger.error(e)
-            parsed_text = JSONResponse(
-                {"Status": "500", "Message": "Something went wrong"}
-            )
-        return parsed_text
-
-
-app = RasaNLUSimpleServer().app
+routes = [Route("/parse", endpoint=parse, methods=["POST"])]
+app = Starlette(debug=True, routes=routes)

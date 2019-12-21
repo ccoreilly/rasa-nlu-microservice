@@ -1,6 +1,6 @@
 # Rasa NLU Simple Server
 
-A really simple HTTP server that parses text using [Rasa NLU](https://github.com/RasaHQ/rasa). Models in the `/models` directory are preloaded and cached in memory fast text parsing.
+A really simple HTTP server that parses text using [Rasa NLU](https://github.com/RasaHQ/rasa). Models in the `/models` directory are preloaded and cached in memory for fast text parsing.
 
 ## Requirements
 
