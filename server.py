@@ -1,63 +1,49 @@
-import asyncio
 import os
-import tempfile
-import functools
 import logging
 
 from threading import Thread
 
-from rasa.nlu.model import Interpreter, components
-from rasa.nlu.training_data.formats import MarkdownReader
-from rasa.nlu.config import RasaNLUModelConfig
-from rasa.model import unpack_model, get_model_subdirectories, create_package_rasa
 from rasa.utils.io import read_yaml, read_config_file
+
 from starlette.applications import Starlette
 from starlette.routing import Route
 from starlette.responses import JSONResponse
 from starlette.exceptions import HTTPException
 from starlette.concurrency import run_in_threadpool
 
-from train import async_train
+from train import AsyncTrainer
+from cache import InterpreterCache
 
-component_builder = components.ComponentBuilder()
+interpreter_cache = InterpreterCache()
+async_trainer = AsyncTrainer(interpreter_cache)
 logger = logging.getLogger("RasaNLUSimpleServer")
-
-@functools.lru_cache(maxsize=128)
-def load_model(model_path):
-    tempdir = tempfile.mkdtemp()
-    unpacked_model = unpack_model(model_path, tempdir)
-    _, nlu_model = get_model_subdirectories(unpacked_model)
-    return Interpreter.load(nlu_model, component_builder)
 
 def preload_models():
     model_dir = "models"
     if os.path.exists(model_dir):
         for (_, _, files) in os.walk(model_dir):
             for file in files:
-                load_model(os.path.join("models", file))
+                interpreter_cache.load(file)
 
 async def parse(request):
-    try:
-        body = await request.json()
-        model_name = body["model"]
-        text = body["text"]
-        model = load_model(os.path.join("models", model_name))
-        parsed_text = JSONResponse(model.parse(text))
-    except Exception as e:
-        logger.error(e)
-        parsed_text = JSONResponse(
-            {"Status": "500", "Message": "Something went wrong"}
-        )
-    return parsed_text
-
-async def train(request):
-    # try:
     body = await request.json()
 
-    if 'nlu_data' not in body or 'model_name' not in body:
+    if 'text' not in body:
         raise HTTPException(422)
 
-    model_name = body["model_name"]
+    model_name = request.path_params["model_name"]
+    text = body["text"]
+    interpreter = interpreter_cache.load(model_name)
+
+    return JSONResponse(interpreter.parse(text))
+
+async def train(request):
+    body = await request.json()
+
+    if 'nlu_data' not in body:
+        raise HTTPException(422)
+
+    model_name = request.path_params["model_name"]
     nlu_data = body["nlu_data"]
 
     if 'config' in body:
@@ -65,26 +51,23 @@ async def train(request):
     else:
         config = read_config_file('./config.yml')
     
-    Thread(target=async_train, args=(nlu_data, model_name, config, component_builder)).start()
+    async_trainer.train(nlu_data, model_name, config)
 
-    return JSONResponse(
-            {"Status": "200", "Message": "Training started"}
-        )
+    return JSONResponse({"status": "200", "message": "Training started"})
 
-    # except HTTPException as e:
-    #     raise e
-    # except Exception as e:
-    #     logger.error(e)
-    #     parsed_text = JSONResponse(
-    #         {"Status": "500", "Message": "Something went wrong"}
-    #     )
-    # return parsed_text
+async def status(request):
+    model_name = request.path_params["model_name"]
+
+    status = async_trainer.status(model_name)
+
+    return JSONResponse({"status": "200", "training_status": status})
 
 # preload_models()
 
 routes = [
-    Route("/parse", endpoint=parse, methods=["POST"]),
-    Route("/train", endpoint=train, methods=["POST"])
+    Route("/model/{model_name}/parse", endpoint=parse, methods=["POST"]),
+    Route("/model/{model_name}/train", endpoint=train, methods=["POST"]),
+    Route("/model/{model_name}/status", endpoint=status, methods=["GET"])
 ]
 
 app = Starlette(debug=True, routes=routes)
