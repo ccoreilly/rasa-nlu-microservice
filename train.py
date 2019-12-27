@@ -2,9 +2,8 @@ import tempfile
 import os
 from threading import Thread, RLock
 
-from rasa.nlu.model import Interpreter, Trainer
-from rasa.nlu.train import train as nlu_train
-from rasa.nlu.training_data.formats import MarkdownReader
+from rasa.nlu.model import Trainer
+from rasa.nlu.training_data.formats import RasaReader
 from rasa.nlu.config import RasaNLUModelConfig
 from rasa.model import create_package_rasa
 
@@ -13,24 +12,26 @@ from cache import InterpreterCache
 class AsyncTrainer():
     def __init__(self, interpreter_cache=InterpreterCache):
         self.interpreter_cache = interpreter_cache
-        self.markdown_reader = MarkdownReader()
+        self.data_reader = RasaReader()
         self.lock = RLock()
         self.training_status = {}
 
     def train(self, nlu_data, model_name, config):
-        data = self.markdown_reader.reads(nlu_data)
-        trainer = Trainer(RasaNLUModelConfig(config), self.interpreter_cache.component_builder)
-
-        thread = Thread(target=self._async_train, args=(trainer, data, model_name))
+        thread = Thread(target=self._async_train, args=(config, nlu_data, model_name))
         thread.start()
 
     def status(self, model_name):
         with self.lock:
             return self.training_status.get(model_name, "UNKNOWN")
 
-    def _async_train(self, trainer, data, model_name):
+    def _async_train(self, config, nlu_data, model_name):
         with self.lock:
             self.training_status[model_name] = "TRAINING"
+        
+        data = self.data_reader.read_from_json({'rasa_nlu_data': nlu_data})
+        with self.interpreter_cache.lock:
+            trainer = Trainer(RasaNLUModelConfig(config), self.interpreter_cache.component_builder)
+        
         interpreter = trainer.train(data)
         tempdir = tempfile.mkdtemp()
         trainer.persist(tempdir, None, "nlu")

@@ -62,7 +62,7 @@ async def status(request):
 
     return JSONResponse({"status": "200", "training_status": status})
 
-# preload_models()
+preload_models()
 
 routes = [
     Route("/model/{model_name}/parse", endpoint=parse, methods=["POST"]),

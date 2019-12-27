@@ -13,8 +13,8 @@ class InterpreterCache():
         self.interpreters = {}
         self.component_builder = components.ComponentBuilder()
         self.lock = RLock()
-        self.root = []                # root of the circular doubly linked list
-        self.root[:] = [self.root, self.root, None, None]     # initialize by pointing to self
+        self.root = []  # root of the circular doubly linked list
+        self.root[:] = [self.root, self.root, None, None]   # initialize by pointing to self
     
     def load(self, model_name):
         with self.lock:
@@ -68,7 +68,10 @@ class InterpreterCache():
         tempdir = tempfile.mkdtemp()
         unpacked_model = unpack_model(model_path, tempdir)
         _, nlu_model = get_model_subdirectories(unpacked_model)
-        return Interpreter.load(nlu_model, self.component_builder)
+        with self.lock:
+            interpreter = Interpreter.load(nlu_model, self.component_builder)
+        
+        return interpreter
 
     def store(self, model_name, interpreter):
         with self.lock:
