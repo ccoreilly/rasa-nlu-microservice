@@ -1,0 +1,11 @@
+version: "3.7"
+services:
+  nlu:
+    build: ./
+    volumes:
+      - ./config.yml:/app/config.yml
+      - ./models/:/app/models/
+    ports:
+      - "8000:8000"
+    command:
+      ["uvicorn", "--log-level", "debug", "--host", "0.0.0.0", "server:app"]
