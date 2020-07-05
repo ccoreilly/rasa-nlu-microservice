@@ -1,6 +1,7 @@
 import tempfile
 import os
 from threading import Thread, RLock
+from timeit import default_timer as timer
 
 from rasa.nlu.model import Trainer
 from rasa.nlu.training_data.formats import RasaReader
@@ -22,11 +23,14 @@ class AsyncTrainer():
 
     def status(self, model_name):
         with self.lock:
-            return self.training_status.get(model_name, "UNKNOWN")
+            return self.training_status.get(model_name, {"status": "UNKNOWN"})
 
     def _async_train(self, config, nlu_data, model_name):
+        training_start = timer()
         with self.lock:
-            self.training_status[model_name] = "TRAINING"
+            self.training_status[model_name] = {
+                "status": "TRAINING",
+            }
         
         data = self.data_reader.read_from_json({'rasa_nlu_data': nlu_data})
         with self.interpreter_cache.lock:
@@ -41,4 +45,8 @@ class AsyncTrainer():
         self.interpreter_cache.store(model_name, interpreter)
         
         with self.lock:
-            self.training_status[model_name] = "READY"
+            training_end = timer()
+            self.training_status[model_name] = {
+                "status": "READY",
+                "training_time": f"{training_end - training_start:.2f}"
+            }
